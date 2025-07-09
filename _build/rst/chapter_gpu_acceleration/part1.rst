@@ -1,0 +1,742 @@
+
+Part 1
+------
+
+In the past chapter, we discussed MLC flows in CPU environments. This
+chapter will discuss how to bring some of the optimizations onto GPU. We
+are going to use CUDA terminology. However, the same set of concepts
+applies to other kinds of GPUs as well.
+
+Install packages
+~~~~~~~~~~~~~~~~
+
+For this course, we will use some ongoing development in TVM, which is
+an open-source machine learning compilation framework. We provide the
+following command to install a packaged version for MLC course. The
+particular notebook of **part 1** depends on a CUDA 11 environment.
+
+.. raw:: latex
+
+   \diilbookstyleinputcell
+
+.. code:: bash
+
+   python3 -m pip install mlc-ai-nightly-cu110 -f https://mlc.ai/wheels
+
+**NOTE: Our build system does not have GPU support yet, so part of codes
+will not be evaluated.**
+
+Preparations
+~~~~~~~~~~~~
+
+To begin with, let us import the necessary dependencies.
+
+.. raw:: latex
+
+   \diilbookstyleinputcell
+
+.. code:: python
+
+    import numpy as np
+    import tvm
+    from tvm import relax
+    from tvm.ir.module import IRModule
+    from tvm.script import relax as R
+    from tvm.script import tir as T
+
+GPU Architecture
+~~~~~~~~~~~~~~~~
+
+Let us begin by reviewing what a GPU architecture looks like. A typical
+GPU contains a collection of stream multi-processors, and each
+multi-processor has many cores. A GPU device is massively parallel and
+allows us to execute many tasks concurrently.
+
+|image1|
+
+To program a GPU, we need to create a set of thread blocks, with each
+thread mapping to the cores and the thread block map to the stream
+multiprocessors.
+
+|image2|
+
+Let us start GPU programming using a vector add example. The following
+TensorIR program takes two vectors, A and B, performs element-wise add,
+and stores the result in C.
+
+.. |image1| image:: ../img/gpu_arch.png
+.. |image2| image:: ../img/gpu_stream_processors.png
+
+.. raw:: latex
+
+   \diilbookstyleinputcell
+
+.. code:: python
+
+    @tvm.script.ir_module
+    class MyModuleVecAdd:
+        @T.prim_func
+        def main(A: T.Buffer((1024,), "float32"),
+                 B: T.Buffer((1024,), "float32"),
+                 C: T.Buffer((1024,), "float32")) -> None:
+            T.func_attr({"global_symbol": "main", "tir.noalias": True})
+            for i in T.grid(1024):
+                with T.block("C"):
+                    vi = T.axis.remap("S", [i])
+                    C[vi] = A[vi] + B[vi]
+
+We first split loop ``i`` into two loops.
+
+.. raw:: latex
+
+   \diilbookstyleinputcell
+
+.. code:: python
+
+    sch = tvm.tir.Schedule(MyModuleVecAdd)
+    block_C = sch.get_block("C")
+    i, = sch.get_loops(block=block_C)
+    i0, i1 = sch.split(i, [None, 128])
+    sch.mod.show()
+
+
+
+.. raw:: html
+
+    <div class="highlight" style="background: "><pre style="line-height: 125%;"><span></span><span style="color: #007979; font-style: italic"># from tvm.script import ir as I</span>
+    <span style="color: #007979; font-style: italic"># from tvm.script import tir as T</span>
+    
+    <span style="color: #A2F">@I</span><span style="color: #A2F; font-weight: bold">.</span>ir_module
+    <span style="color: #008000; font-weight: bold">class</span> <span style="color: #00F; font-weight: bold">Module</span>:
+        <span style="color: #A2F">@T</span><span style="color: #A2F; font-weight: bold">.</span>prim_func
+        <span style="color: #008000; font-weight: bold">def</span> <span style="color: #00F">main</span>(A: T<span style="color: #A2F; font-weight: bold">.</span>Buffer((<span style="color: #008000">1024</span>,), <span style="color: #BA2121">&quot;float32&quot;</span>), B: T<span style="color: #A2F; font-weight: bold">.</span>Buffer((<span style="color: #008000">1024</span>,), <span style="color: #BA2121">&quot;float32&quot;</span>), C: T<span style="color: #A2F; font-weight: bold">.</span>Buffer((<span style="color: #008000">1024</span>,), <span style="color: #BA2121">&quot;float32&quot;</span>)):
+            T<span style="color: #A2F; font-weight: bold">.</span>func_attr({<span style="color: #BA2121">&quot;tir.noalias&quot;</span>: T<span style="color: #A2F; font-weight: bold">.</span>bool(<span style="color: #008000; font-weight: bold">True</span>)})
+            <span style="color: #007979; font-style: italic"># with T.block(&quot;root&quot;):</span>
+            <span style="color: #008000; font-weight: bold">for</span> i_0, i_1 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>grid(<span style="color: #008000">8</span>, <span style="color: #008000">128</span>):
+                <span style="color: #008000; font-weight: bold">with</span> T<span style="color: #A2F; font-weight: bold">.</span>block(<span style="color: #BA2121">&quot;C&quot;</span>):
+                    vi <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>spatial(<span style="color: #008000">1024</span>, i_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">128</span> <span style="color: #A2F; font-weight: bold">+</span> i_1)
+                    T<span style="color: #A2F; font-weight: bold">.</span>reads(A[vi], B[vi])
+                    T<span style="color: #A2F; font-weight: bold">.</span>writes(C[vi])
+                    C[vi] <span style="color: #A2F; font-weight: bold">=</span> A[vi] <span style="color: #A2F; font-weight: bold">+</span> B[vi]
+    </pre></div>
+
+
+
+GPU Thread Blocks
+^^^^^^^^^^^^^^^^^
+
+Then we bind the iterators to the GPU thread blocks. Each thread is
+parameterized by two indices – ``threadIdx.x`` and ``blockIdx.x``. In
+practice, we can have multiple dimensional thread indices, but we keep
+them simple as one dimension.
+
+|image1|
+
+.. |image1| image:: ../img/gpu_thread_blocks.png
+
+.. raw:: latex
+
+   \diilbookstyleinputcell
+
+.. code:: python
+
+    sch.bind(i0, "blockIdx.x")
+    sch.bind(i1, "threadIdx.x")
+    sch.mod.show()
+
+
+
+.. raw:: html
+
+    <div class="highlight" style="background: "><pre style="line-height: 125%;"><span></span><span style="color: #007979; font-style: italic"># from tvm.script import ir as I</span>
+    <span style="color: #007979; font-style: italic"># from tvm.script import tir as T</span>
+    
+    <span style="color: #A2F">@I</span><span style="color: #A2F; font-weight: bold">.</span>ir_module
+    <span style="color: #008000; font-weight: bold">class</span> <span style="color: #00F; font-weight: bold">Module</span>:
+        <span style="color: #A2F">@T</span><span style="color: #A2F; font-weight: bold">.</span>prim_func
+        <span style="color: #008000; font-weight: bold">def</span> <span style="color: #00F">main</span>(A: T<span style="color: #A2F; font-weight: bold">.</span>Buffer((<span style="color: #008000">1024</span>,), <span style="color: #BA2121">&quot;float32&quot;</span>), B: T<span style="color: #A2F; font-weight: bold">.</span>Buffer((<span style="color: #008000">1024</span>,), <span style="color: #BA2121">&quot;float32&quot;</span>), C: T<span style="color: #A2F; font-weight: bold">.</span>Buffer((<span style="color: #008000">1024</span>,), <span style="color: #BA2121">&quot;float32&quot;</span>)):
+            T<span style="color: #A2F; font-weight: bold">.</span>func_attr({<span style="color: #BA2121">&quot;tir.noalias&quot;</span>: T<span style="color: #A2F; font-weight: bold">.</span>bool(<span style="color: #008000; font-weight: bold">True</span>)})
+            <span style="color: #007979; font-style: italic"># with T.block(&quot;root&quot;):</span>
+            <span style="color: #008000; font-weight: bold">for</span> i_0 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>thread_binding(<span style="color: #008000">8</span>, thread<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;blockIdx.x&quot;</span>):
+                <span style="color: #008000; font-weight: bold">for</span> i_1 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>thread_binding(<span style="color: #008000">128</span>, thread<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;threadIdx.x&quot;</span>):
+                    <span style="color: #008000; font-weight: bold">with</span> T<span style="color: #A2F; font-weight: bold">.</span>block(<span style="color: #BA2121">&quot;C&quot;</span>):
+                        vi <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>spatial(<span style="color: #008000">1024</span>, i_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">128</span> <span style="color: #A2F; font-weight: bold">+</span> i_1)
+                        T<span style="color: #A2F; font-weight: bold">.</span>reads(A[vi], B[vi])
+                        T<span style="color: #A2F; font-weight: bold">.</span>writes(C[vi])
+                        C[vi] <span style="color: #A2F; font-weight: bold">=</span> A[vi] <span style="color: #A2F; font-weight: bold">+</span> B[vi]
+    </pre></div>
+
+
+
+Build and Run the TensorIR Function on GPU
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+We can build and test out the resulting function on the GPU.
+
+.. raw:: latex
+
+   \diilbookstyleinputcell
+
+.. code:: python
+
+   rt_mod = tvm.build(sch.mod, target="cuda")
+
+   A_np = np.random.uniform(size=(1024,)).astype("float32")
+   B_np = np.random.uniform(size=(1024,)).astype("float32")
+   A_nd = tvm.nd.array(A_np, tvm.cuda(0))
+   B_nd = tvm.nd.array(B_np, tvm.cuda(0))
+   C_nd = tvm.nd.array(np.zeros((1024,), dtype="float32"), tvm.cuda(0))
+
+   rt_mod["main"](A_nd, B_nd, C_nd)
+   print(A_nd)
+   print(B_nd)
+   print(C_nd)
+
+Window Sum Example
+~~~~~~~~~~~~~~~~~~
+
+Now, let us move forward to another example – window sum. This program
+can be viewed as a basic version of “convolution” with a predefined
+weight ``[1,1,1]``. We are taking sliding over the input and add three
+neighboring values together.
+
+|image1|
+
+.. |image1| image:: ../img/window_sum.png
+
+.. raw:: latex
+
+   \diilbookstyleinputcell
+
+.. code:: python
+
+    @tvm.script.ir_module
+    class MyModuleWindowSum:
+        @T.prim_func
+        def main(A: T.Buffer[(1027,), "float32"],
+                 B: T.Buffer[(1024,), "float32"]) -> None:
+            T.func_attr({"global_symbol": "main", "tir.noalias": True})
+            for i in T.grid(1024):
+                with T.block("C"):
+                    vi = T.axis.remap("S", [i])
+                    B[vi] = A[vi] + A[vi + 1] + A[vi + 2]
+
+First, we can bind the loop to GPU threads.
+
+.. raw:: latex
+
+   \diilbookstyleinputcell
+
+.. code:: python
+
+    sch = tvm.tir.Schedule(MyModuleWindowSum)
+    nthread = 128
+    block_C = sch.get_block("C")
+    i,  = sch.get_loops(block=block_C)
+    i0, i1 = sch.split(i, [None, nthread])
+    sch.bind(i0, "blockIdx.x")
+    sch.bind(i1, "threadIdx.x")
+    sch.mod.show()
+
+
+
+.. raw:: html
+
+    <div class="highlight" style="background: "><pre style="line-height: 125%;"><span></span><span style="color: #007979; font-style: italic"># from tvm.script import ir as I</span>
+    <span style="color: #007979; font-style: italic"># from tvm.script import tir as T</span>
+    
+    <span style="color: #A2F">@I</span><span style="color: #A2F; font-weight: bold">.</span>ir_module
+    <span style="color: #008000; font-weight: bold">class</span> <span style="color: #00F; font-weight: bold">Module</span>:
+        <span style="color: #A2F">@T</span><span style="color: #A2F; font-weight: bold">.</span>prim_func
+        <span style="color: #008000; font-weight: bold">def</span> <span style="color: #00F">main</span>(A: T<span style="color: #A2F; font-weight: bold">.</span>Buffer((<span style="color: #008000">1027</span>,), <span style="color: #BA2121">&quot;float32&quot;</span>), B: T<span style="color: #A2F; font-weight: bold">.</span>Buffer((<span style="color: #008000">1024</span>,), <span style="color: #BA2121">&quot;float32&quot;</span>)):
+            T<span style="color: #A2F; font-weight: bold">.</span>func_attr({<span style="color: #BA2121">&quot;tir.noalias&quot;</span>: T<span style="color: #A2F; font-weight: bold">.</span>bool(<span style="color: #008000; font-weight: bold">True</span>)})
+            <span style="color: #007979; font-style: italic"># with T.block(&quot;root&quot;):</span>
+            <span style="color: #008000; font-weight: bold">for</span> i_0 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>thread_binding(<span style="color: #008000">8</span>, thread<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;blockIdx.x&quot;</span>):
+                <span style="color: #008000; font-weight: bold">for</span> i_1 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>thread_binding(<span style="color: #008000">128</span>, thread<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;threadIdx.x&quot;</span>):
+                    <span style="color: #008000; font-weight: bold">with</span> T<span style="color: #A2F; font-weight: bold">.</span>block(<span style="color: #BA2121">&quot;C&quot;</span>):
+                        vi <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>spatial(<span style="color: #008000">1024</span>, i_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">128</span> <span style="color: #A2F; font-weight: bold">+</span> i_1)
+                        T<span style="color: #A2F; font-weight: bold">.</span>reads(A[vi:vi <span style="color: #A2F; font-weight: bold">+</span> <span style="color: #008000">3</span>])
+                        T<span style="color: #A2F; font-weight: bold">.</span>writes(B[vi])
+                        B[vi] <span style="color: #A2F; font-weight: bold">=</span> A[vi] <span style="color: #A2F; font-weight: bold">+</span> A[vi <span style="color: #A2F; font-weight: bold">+</span> <span style="color: #008000">1</span>] <span style="color: #A2F; font-weight: bold">+</span> A[vi <span style="color: #A2F; font-weight: bold">+</span> <span style="color: #008000">2</span>]
+    </pre></div>
+
+
+
+|image1|
+
+Importantly, in this case, there are reuse opportunities. Remember that
+each GPU thread block contains shared memory that all threads can access
+within the block. We use ``cache_read`` to add an intermediate stage
+that caches segments (in green below) onto the shared memory. After the
+caching is finished, the threads can then read from the shared memory.
+
+.. |image1| image:: ../img/gpu_stream_processors.png
+
+.. raw:: latex
+
+   \diilbookstyleinputcell
+
+.. code:: python
+
+    A_shared = sch.cache_read(block_C, read_buffer_index=0, storage_scope="shared")
+    sch.compute_at(A_shared, i1)
+    sch.mod.show()
+
+
+
+.. raw:: html
+
+    <div class="highlight" style="background: "><pre style="line-height: 125%;"><span></span><span style="color: #007979; font-style: italic"># from tvm.script import ir as I</span>
+    <span style="color: #007979; font-style: italic"># from tvm.script import tir as T</span>
+    
+    <span style="color: #A2F">@I</span><span style="color: #A2F; font-weight: bold">.</span>ir_module
+    <span style="color: #008000; font-weight: bold">class</span> <span style="color: #00F; font-weight: bold">Module</span>:
+        <span style="color: #A2F">@T</span><span style="color: #A2F; font-weight: bold">.</span>prim_func
+        <span style="color: #008000; font-weight: bold">def</span> <span style="color: #00F">main</span>(A: T<span style="color: #A2F; font-weight: bold">.</span>Buffer((<span style="color: #008000">1027</span>,), <span style="color: #BA2121">&quot;float32&quot;</span>), B: T<span style="color: #A2F; font-weight: bold">.</span>Buffer((<span style="color: #008000">1024</span>,), <span style="color: #BA2121">&quot;float32&quot;</span>)):
+            T<span style="color: #A2F; font-weight: bold">.</span>func_attr({<span style="color: #BA2121">&quot;tir.noalias&quot;</span>: T<span style="color: #A2F; font-weight: bold">.</span>bool(<span style="color: #008000; font-weight: bold">True</span>)})
+            <span style="color: #007979; font-style: italic"># with T.block(&quot;root&quot;):</span>
+            A_shared <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>alloc_buffer((<span style="color: #008000">1027</span>,), scope<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;shared&quot;</span>)
+            <span style="color: #008000; font-weight: bold">for</span> i_0 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>thread_binding(<span style="color: #008000">8</span>, thread<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;blockIdx.x&quot;</span>):
+                <span style="color: #008000; font-weight: bold">for</span> i_1 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>thread_binding(<span style="color: #008000">128</span>, thread<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;threadIdx.x&quot;</span>):
+                    <span style="color: #008000; font-weight: bold">for</span> ax0 <span style="color: #008000; font-weight: bold">in</span> range(<span style="color: #008000">130</span>):
+                        <span style="color: #008000; font-weight: bold">with</span> T<span style="color: #A2F; font-weight: bold">.</span>block(<span style="color: #BA2121">&quot;A_shared&quot;</span>):
+                            v0 <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>spatial(<span style="color: #008000">1027</span>, i_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">128</span> <span style="color: #A2F; font-weight: bold">+</span> ax0)
+                            T<span style="color: #A2F; font-weight: bold">.</span>reads(A[v0])
+                            T<span style="color: #A2F; font-weight: bold">.</span>writes(A_shared[v0])
+                            A_shared[v0] <span style="color: #A2F; font-weight: bold">=</span> A[v0]
+                    <span style="color: #008000; font-weight: bold">with</span> T<span style="color: #A2F; font-weight: bold">.</span>block(<span style="color: #BA2121">&quot;C&quot;</span>):
+                        vi <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>spatial(<span style="color: #008000">1024</span>, i_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">128</span> <span style="color: #A2F; font-weight: bold">+</span> i_1)
+                        T<span style="color: #A2F; font-weight: bold">.</span>reads(A_shared[vi:vi <span style="color: #A2F; font-weight: bold">+</span> <span style="color: #008000">3</span>])
+                        T<span style="color: #A2F; font-weight: bold">.</span>writes(B[vi])
+                        B[vi] <span style="color: #A2F; font-weight: bold">=</span> A_shared[vi] <span style="color: #A2F; font-weight: bold">+</span> A_shared[vi <span style="color: #A2F; font-weight: bold">+</span> <span style="color: #008000">1</span>] <span style="color: #A2F; font-weight: bold">+</span> A_shared[vi <span style="color: #A2F; font-weight: bold">+</span> <span style="color: #008000">2</span>]
+    </pre></div>
+
+
+
+Because the memory is shared across threads, we need to re-split the
+loop and bind the inner iterator of the fetching process onto the thread
+indices. This technique is called **cooperative fetching**, where
+multiple threads work together to bring the data onto the shared memory.
+The following reading process can be different.
+
+.. raw:: latex
+
+   \diilbookstyleinputcell
+
+.. code:: python
+
+    ax = sch.get_loops(A_shared)[-1]
+    ax0, ax1 = sch.split(ax, [None, nthread])
+    sch.bind(ax1, "threadIdx.x")
+    sch.mod.show()
+
+
+
+.. raw:: html
+
+    <div class="highlight" style="background: "><pre style="line-height: 125%;"><span></span><span style="color: #007979; font-style: italic"># from tvm.script import ir as I</span>
+    <span style="color: #007979; font-style: italic"># from tvm.script import tir as T</span>
+    
+    <span style="color: #A2F">@I</span><span style="color: #A2F; font-weight: bold">.</span>ir_module
+    <span style="color: #008000; font-weight: bold">class</span> <span style="color: #00F; font-weight: bold">Module</span>:
+        <span style="color: #A2F">@T</span><span style="color: #A2F; font-weight: bold">.</span>prim_func
+        <span style="color: #008000; font-weight: bold">def</span> <span style="color: #00F">main</span>(A: T<span style="color: #A2F; font-weight: bold">.</span>Buffer((<span style="color: #008000">1027</span>,), <span style="color: #BA2121">&quot;float32&quot;</span>), B: T<span style="color: #A2F; font-weight: bold">.</span>Buffer((<span style="color: #008000">1024</span>,), <span style="color: #BA2121">&quot;float32&quot;</span>)):
+            T<span style="color: #A2F; font-weight: bold">.</span>func_attr({<span style="color: #BA2121">&quot;tir.noalias&quot;</span>: T<span style="color: #A2F; font-weight: bold">.</span>bool(<span style="color: #008000; font-weight: bold">True</span>)})
+            <span style="color: #007979; font-style: italic"># with T.block(&quot;root&quot;):</span>
+            A_shared <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>alloc_buffer((<span style="color: #008000">1027</span>,), scope<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;shared&quot;</span>)
+            <span style="color: #008000; font-weight: bold">for</span> i_0 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>thread_binding(<span style="color: #008000">8</span>, thread<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;blockIdx.x&quot;</span>):
+                <span style="color: #008000; font-weight: bold">for</span> i_1 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>thread_binding(<span style="color: #008000">128</span>, thread<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;threadIdx.x&quot;</span>):
+                    <span style="color: #008000; font-weight: bold">for</span> ax0_0 <span style="color: #008000; font-weight: bold">in</span> range(<span style="color: #008000">2</span>):
+                        <span style="color: #008000; font-weight: bold">for</span> ax0_1 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>thread_binding(<span style="color: #008000">128</span>, thread<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;threadIdx.x&quot;</span>):
+                            <span style="color: #008000; font-weight: bold">with</span> T<span style="color: #A2F; font-weight: bold">.</span>block(<span style="color: #BA2121">&quot;A_shared&quot;</span>):
+                                v0 <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>spatial(<span style="color: #008000">1027</span>, i_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">128</span> <span style="color: #A2F; font-weight: bold">+</span> (ax0_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">128</span> <span style="color: #A2F; font-weight: bold">+</span> ax0_1))
+                                T<span style="color: #A2F; font-weight: bold">.</span>where(ax0_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">128</span> <span style="color: #A2F; font-weight: bold">+</span> ax0_1 <span style="color: #A2F; font-weight: bold">&lt;</span> <span style="color: #008000">130</span>)
+                                T<span style="color: #A2F; font-weight: bold">.</span>reads(A[v0])
+                                T<span style="color: #A2F; font-weight: bold">.</span>writes(A_shared[v0])
+                                A_shared[v0] <span style="color: #A2F; font-weight: bold">=</span> A[v0]
+                    <span style="color: #008000; font-weight: bold">with</span> T<span style="color: #A2F; font-weight: bold">.</span>block(<span style="color: #BA2121">&quot;C&quot;</span>):
+                        vi <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>spatial(<span style="color: #008000">1024</span>, i_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">128</span> <span style="color: #A2F; font-weight: bold">+</span> i_1)
+                        T<span style="color: #A2F; font-weight: bold">.</span>reads(A_shared[vi:vi <span style="color: #A2F; font-weight: bold">+</span> <span style="color: #008000">3</span>])
+                        T<span style="color: #A2F; font-weight: bold">.</span>writes(B[vi])
+                        B[vi] <span style="color: #A2F; font-weight: bold">=</span> A_shared[vi] <span style="color: #A2F; font-weight: bold">+</span> A_shared[vi <span style="color: #A2F; font-weight: bold">+</span> <span style="color: #008000">1</span>] <span style="color: #A2F; font-weight: bold">+</span> A_shared[vi <span style="color: #A2F; font-weight: bold">+</span> <span style="color: #008000">2</span>]
+    </pre></div>
+
+
+
+We can inspect the corresponding low-level code (in CUDA). The generated
+code contains two parts:
+
+- A host part that calls into the GPU driver
+- A cuda kernel that runs the corresponding computation.
+
+We can print out the cuda kernel using the following code. We still need
+both the host and kernel code to run the program, so it is only a quick
+way to inspect what the final code generation result.
+
+Notably, the build process automatically compacts the shared memory
+stage to use a minimum region used within the thread block.
+
+.. raw:: latex
+
+   \diilbookstyleinputcell
+
+.. code:: python
+
+   rt_mod = tvm.build(sch.mod, target="cuda")
+   print(rt_mod.imported_modules[0].get_source())
+
+Build Code for Other GPU Platforms
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A MLC process usually support targeting multiple kinds of hardware
+platforms, we can generate Metal code(which is another kind of GPU
+programming model) by changing the target parameter.
+
+.. raw:: latex
+
+   \diilbookstyleinputcell
+
+.. code:: python
+
+   rt_mod = tvm.build(sch.mod, target="metal")
+   print(rt_mod.imported_modules[0].get_source())
+
+Matrix Multiplication
+~~~~~~~~~~~~~~~~~~~~~
+
+Let us now get to something slightly more complicated and try out
+optimizing matrix multiplication on GPU. We will go over two common
+techniques for GPU performance optimization.
+
+.. raw:: latex
+
+   \diilbookstyleinputcell
+
+.. code:: python
+
+    @tvm.script.ir_module
+    class MyModuleMatmul:
+        @T.prim_func
+        def main(A: T.Buffer((1024, 1024), "float32"),
+                 B: T.Buffer((1024, 1024), "float32"),
+                 C: T.Buffer((1024, 1024), "float32")) -> None:
+            T.func_attr({"global_symbol": "main", "tir.noalias": True})
+            for i, j, k in T.grid(1024, 1024, 1024):
+                with T.block("C"):
+                    vi, vj, vk = T.axis.remap("SSR", [i, j, k])
+                    with T.init():
+                        C[vi, vj] = 0.0
+                    C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vk, vj]
+
+Local Blocking
+^^^^^^^^^^^^^^
+
+|image1|
+
+To increase overall memory reuse. We can tile the loops. In particular,
+we introduce local tiles such that we only need to load stripe of data
+from A and B once, then use them to perform a ``V * V`` matrix
+multiplication result.
+
+This local tiling helps to reduce the memory pressure, as each element
+in the stripe is reused ``V`` times.
+
+.. |image1| image:: ../img/gpu_local_blocking.png
+
+.. raw:: latex
+
+   \diilbookstyleinputcell
+
+.. code:: python
+
+    def blocking(sch,
+                 tile_local_y,
+                 tile_local_x,
+                 tile_block_y,
+                 tile_block_x,
+                 tile_k):
+        block_C = sch.get_block("C")
+        C_local = sch.cache_write(block_C, 0, "local")
+    
+        i, j, k = sch.get_loops(block=block_C)
+    
+        i0, i1, i2 = sch.split(loop=i, factors=[None, tile_block_y, tile_local_y])
+        j0, j1, j2 = sch.split(loop=j, factors=[None, tile_block_x, tile_local_x])
+        k0, k1 = sch.split(loop=k, factors=[None, tile_k])
+        sch.unroll(k1)
+        sch.reorder(i0, j0, i1, j1, k0, k1, i2, j2)
+        sch.reverse_compute_at(C_local, j1)
+    
+        sch.bind(i0, "blockIdx.y")
+        sch.bind(j0, "blockIdx.x")
+    
+        sch.bind(i1, "threadIdx.y")
+        sch.bind(j1, "threadIdx.x")
+        sch.decompose_reduction(block_C, k0)
+    
+        return sch
+    
+    sch = tvm.tir.Schedule(MyModuleMatmul)
+    sch = blocking(sch, 8, 8, 8, 8, 4)
+    sch.mod.show()
+
+
+
+.. raw:: html
+
+    <div class="highlight" style="background: "><pre style="line-height: 125%;"><span></span><span style="color: #007979; font-style: italic"># from tvm.script import ir as I</span>
+    <span style="color: #007979; font-style: italic"># from tvm.script import tir as T</span>
+    
+    <span style="color: #A2F">@I</span><span style="color: #A2F; font-weight: bold">.</span>ir_module
+    <span style="color: #008000; font-weight: bold">class</span> <span style="color: #00F; font-weight: bold">Module</span>:
+        <span style="color: #A2F">@T</span><span style="color: #A2F; font-weight: bold">.</span>prim_func
+        <span style="color: #008000; font-weight: bold">def</span> <span style="color: #00F">main</span>(A: T<span style="color: #A2F; font-weight: bold">.</span>Buffer((<span style="color: #008000">1024</span>, <span style="color: #008000">1024</span>), <span style="color: #BA2121">&quot;float32&quot;</span>), B: T<span style="color: #A2F; font-weight: bold">.</span>Buffer((<span style="color: #008000">1024</span>, <span style="color: #008000">1024</span>), <span style="color: #BA2121">&quot;float32&quot;</span>), C: T<span style="color: #A2F; font-weight: bold">.</span>Buffer((<span style="color: #008000">1024</span>, <span style="color: #008000">1024</span>), <span style="color: #BA2121">&quot;float32&quot;</span>)):
+            T<span style="color: #A2F; font-weight: bold">.</span>func_attr({<span style="color: #BA2121">&quot;tir.noalias&quot;</span>: T<span style="color: #A2F; font-weight: bold">.</span>bool(<span style="color: #008000; font-weight: bold">True</span>)})
+            <span style="color: #007979; font-style: italic"># with T.block(&quot;root&quot;):</span>
+            C_local <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>alloc_buffer((<span style="color: #008000">1024</span>, <span style="color: #008000">1024</span>), scope<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;local&quot;</span>)
+            <span style="color: #008000; font-weight: bold">for</span> i_0 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>thread_binding(<span style="color: #008000">16</span>, thread<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;blockIdx.y&quot;</span>):
+                <span style="color: #008000; font-weight: bold">for</span> j_0 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>thread_binding(<span style="color: #008000">16</span>, thread<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;blockIdx.x&quot;</span>):
+                    <span style="color: #008000; font-weight: bold">for</span> i_1 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>thread_binding(<span style="color: #008000">8</span>, thread<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;threadIdx.y&quot;</span>):
+                        <span style="color: #008000; font-weight: bold">for</span> j_1 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>thread_binding(<span style="color: #008000">8</span>, thread<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;threadIdx.x&quot;</span>):
+                            <span style="color: #008000; font-weight: bold">for</span> i_2_init, j_2_init <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>grid(<span style="color: #008000">8</span>, <span style="color: #008000">8</span>):
+                                <span style="color: #008000; font-weight: bold">with</span> T<span style="color: #A2F; font-weight: bold">.</span>block(<span style="color: #BA2121">&quot;C_init&quot;</span>):
+                                    vi <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>spatial(<span style="color: #008000">1024</span>, i_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">64</span> <span style="color: #A2F; font-weight: bold">+</span> i_1 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">8</span> <span style="color: #A2F; font-weight: bold">+</span> i_2_init)
+                                    vj <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>spatial(<span style="color: #008000">1024</span>, j_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">64</span> <span style="color: #A2F; font-weight: bold">+</span> j_1 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">8</span> <span style="color: #A2F; font-weight: bold">+</span> j_2_init)
+                                    T<span style="color: #A2F; font-weight: bold">.</span>reads()
+                                    T<span style="color: #A2F; font-weight: bold">.</span>writes(C_local[vi, vj])
+                                    C_local[vi, vj] <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>float32(<span style="color: #008000">0.0</span>)
+                            <span style="color: #008000; font-weight: bold">for</span> k_0 <span style="color: #008000; font-weight: bold">in</span> range(<span style="color: #008000">256</span>):
+                                <span style="color: #008000; font-weight: bold">for</span> k_1 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>unroll(<span style="color: #008000">4</span>):
+                                    <span style="color: #008000; font-weight: bold">for</span> i_2, j_2 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>grid(<span style="color: #008000">8</span>, <span style="color: #008000">8</span>):
+                                        <span style="color: #008000; font-weight: bold">with</span> T<span style="color: #A2F; font-weight: bold">.</span>block(<span style="color: #BA2121">&quot;C_update&quot;</span>):
+                                            vi <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>spatial(<span style="color: #008000">1024</span>, i_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">64</span> <span style="color: #A2F; font-weight: bold">+</span> i_1 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">8</span> <span style="color: #A2F; font-weight: bold">+</span> i_2)
+                                            vj <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>spatial(<span style="color: #008000">1024</span>, j_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">64</span> <span style="color: #A2F; font-weight: bold">+</span> j_1 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">8</span> <span style="color: #A2F; font-weight: bold">+</span> j_2)
+                                            vk <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>reduce(<span style="color: #008000">1024</span>, k_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">4</span> <span style="color: #A2F; font-weight: bold">+</span> k_1)
+                                            T<span style="color: #A2F; font-weight: bold">.</span>reads(C_local[vi, vj], A[vi, vk], B[vk, vj])
+                                            T<span style="color: #A2F; font-weight: bold">.</span>writes(C_local[vi, vj])
+                                            C_local[vi, vj] <span style="color: #A2F; font-weight: bold">=</span> C_local[vi, vj] <span style="color: #A2F; font-weight: bold">+</span> A[vi, vk] <span style="color: #A2F; font-weight: bold">*</span> B[vk, vj]
+                            <span style="color: #008000; font-weight: bold">for</span> ax0, ax1 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>grid(<span style="color: #008000">8</span>, <span style="color: #008000">8</span>):
+                                <span style="color: #008000; font-weight: bold">with</span> T<span style="color: #A2F; font-weight: bold">.</span>block(<span style="color: #BA2121">&quot;C_local&quot;</span>):
+                                    v0 <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>spatial(<span style="color: #008000">1024</span>, i_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">64</span> <span style="color: #A2F; font-weight: bold">+</span> i_1 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">8</span> <span style="color: #A2F; font-weight: bold">+</span> ax0)
+                                    v1 <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>spatial(<span style="color: #008000">1024</span>, j_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">64</span> <span style="color: #A2F; font-weight: bold">+</span> j_1 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">8</span> <span style="color: #A2F; font-weight: bold">+</span> ax1)
+                                    T<span style="color: #A2F; font-weight: bold">.</span>reads(C_local[v0, v1])
+                                    T<span style="color: #A2F; font-weight: bold">.</span>writes(C[v0, v1])
+                                    C[v0, v1] <span style="color: #A2F; font-weight: bold">=</span> C_local[v0, v1]
+    </pre></div>
+
+
+
+.. raw:: latex
+
+   \diilbookstyleinputcell
+
+.. code:: python
+
+   rt_mod = tvm.build(sch.mod, target="cuda")
+   dev = tvm.cuda(0)
+   A_np = np.random.uniform(size=(1024, 1024)).astype("float32")
+   B_np = np.random.uniform(size=(1024, 1024)).astype("float32")
+   A_nd = tvm.nd.array(A_np, dev)
+   B_nd = tvm.nd.array(B_np, dev)
+   C_nd = tvm.nd.array(np.zeros((1024, 1024), dtype="float32"), dev)
+
+   num_flop = 2 * 1024 * 1024 * 1024
+   evaluator = rt_mod.time_evaluator("main", dev, number=10)
+
+   print("GEMM-Blocking: %f GFLOPS" % (num_flop / evaluator(A_nd, B_nd, C_nd).mean / 1e9))
+
+Shared Memory Blocking
+~~~~~~~~~~~~~~~~~~~~~~
+
+|image1|
+
+Our first attempt did not consider the neighboring threads which sit in
+the same GPU thread block, and we can load the data they commonly need
+into a piece of shared memory.
+
+The following transformation does that.
+
+.. |image1| image:: ../img/gpu_shared_blocking.png
+
+.. raw:: latex
+
+   \diilbookstyleinputcell
+
+.. code:: python
+
+    def cache_read_and_coop_fetch(sch, block, nthread, read_idx, read_loc):
+        read_cache = sch.cache_read(block=block, read_buffer_index=read_idx, storage_scope="shared")
+        sch.compute_at(block=read_cache, loop=read_loc)
+        # vectorized cooperative fetch
+        inner0, inner1 = sch.get_loops(block=read_cache)[-2:]
+        inner = sch.fuse(inner0, inner1)
+        _, tx, vec = sch.split(loop=inner, factors=[None, nthread, 4])
+        sch.vectorize(vec)
+        sch.bind(tx, "threadIdx.x")
+    
+    
+    def blocking_with_shared(
+        sch,
+        tile_local_y,
+        tile_local_x,
+        tile_block_y,
+        tile_block_x,
+        tile_k):
+        block_C = sch.get_block("C")
+        C_local = sch.cache_write(block_C, 0, "local")
+    
+        i, j, k = sch.get_loops(block=block_C)
+    
+        i0, i1, i2 = sch.split(loop=i, factors=[None, tile_block_y, tile_local_y])
+        j0, j1, j2 = sch.split(loop=j, factors=[None, tile_block_x, tile_local_x])
+        k0, k1 = sch.split(loop=k, factors=[None, tile_k])
+    
+        sch.reorder(i0, j0, i1, j1, k0, k1, i2, j2)
+        sch.reverse_compute_at(C_local, j1)
+    
+        sch.bind(i0, "blockIdx.y")
+        sch.bind(j0, "blockIdx.x")
+    
+        tx = sch.fuse(i1, j1)
+        sch.bind(tx, "threadIdx.x")
+        nthread = tile_block_y * tile_block_x
+        cache_read_and_coop_fetch(sch, block_C, nthread, 0, k0)
+        cache_read_and_coop_fetch(sch, block_C, nthread, 1, k0)
+        sch.decompose_reduction(block_C, k0)
+    
+        return sch
+    
+    sch = tvm.tir.Schedule(MyModuleMatmul)
+    sch = blocking_with_shared(sch, 8, 8, 8, 8, 8)
+    sch.mod.show()
+
+
+
+.. raw:: html
+
+    <div class="highlight" style="background: "><pre style="line-height: 125%;"><span></span><span style="color: #007979; font-style: italic"># from tvm.script import ir as I</span>
+    <span style="color: #007979; font-style: italic"># from tvm.script import tir as T</span>
+    
+    <span style="color: #A2F">@I</span><span style="color: #A2F; font-weight: bold">.</span>ir_module
+    <span style="color: #008000; font-weight: bold">class</span> <span style="color: #00F; font-weight: bold">Module</span>:
+        <span style="color: #A2F">@T</span><span style="color: #A2F; font-weight: bold">.</span>prim_func
+        <span style="color: #008000; font-weight: bold">def</span> <span style="color: #00F">main</span>(A: T<span style="color: #A2F; font-weight: bold">.</span>Buffer((<span style="color: #008000">1024</span>, <span style="color: #008000">1024</span>), <span style="color: #BA2121">&quot;float32&quot;</span>), B: T<span style="color: #A2F; font-weight: bold">.</span>Buffer((<span style="color: #008000">1024</span>, <span style="color: #008000">1024</span>), <span style="color: #BA2121">&quot;float32&quot;</span>), C: T<span style="color: #A2F; font-weight: bold">.</span>Buffer((<span style="color: #008000">1024</span>, <span style="color: #008000">1024</span>), <span style="color: #BA2121">&quot;float32&quot;</span>)):
+            T<span style="color: #A2F; font-weight: bold">.</span>func_attr({<span style="color: #BA2121">&quot;tir.noalias&quot;</span>: T<span style="color: #A2F; font-weight: bold">.</span>bool(<span style="color: #008000; font-weight: bold">True</span>)})
+            <span style="color: #007979; font-style: italic"># with T.block(&quot;root&quot;):</span>
+            C_local <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>alloc_buffer((<span style="color: #008000">1024</span>, <span style="color: #008000">1024</span>), scope<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;local&quot;</span>)
+            A_shared <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>alloc_buffer((<span style="color: #008000">1024</span>, <span style="color: #008000">1024</span>), scope<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;shared&quot;</span>)
+            B_shared <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>alloc_buffer((<span style="color: #008000">1024</span>, <span style="color: #008000">1024</span>), scope<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;shared&quot;</span>)
+            <span style="color: #008000; font-weight: bold">for</span> i_0 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>thread_binding(<span style="color: #008000">16</span>, thread<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;blockIdx.y&quot;</span>):
+                <span style="color: #008000; font-weight: bold">for</span> j_0 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>thread_binding(<span style="color: #008000">16</span>, thread<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;blockIdx.x&quot;</span>):
+                    <span style="color: #008000; font-weight: bold">for</span> i_1_j_1_fused <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>thread_binding(<span style="color: #008000">64</span>, thread<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;threadIdx.x&quot;</span>):
+                        <span style="color: #008000; font-weight: bold">for</span> i_2_init, j_2_init <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>grid(<span style="color: #008000">8</span>, <span style="color: #008000">8</span>):
+                            <span style="color: #008000; font-weight: bold">with</span> T<span style="color: #A2F; font-weight: bold">.</span>block(<span style="color: #BA2121">&quot;C_init&quot;</span>):
+                                vi <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>spatial(<span style="color: #008000">1024</span>, i_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">64</span> <span style="color: #A2F; font-weight: bold">+</span> i_1_j_1_fused <span style="color: #A2F; font-weight: bold">//</span> <span style="color: #008000">8</span> <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">8</span> <span style="color: #A2F; font-weight: bold">+</span> i_2_init)
+                                vj <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>spatial(<span style="color: #008000">1024</span>, j_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">64</span> <span style="color: #A2F; font-weight: bold">+</span> i_1_j_1_fused <span style="color: #A2F; font-weight: bold">%</span> <span style="color: #008000">8</span> <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">8</span> <span style="color: #A2F; font-weight: bold">+</span> j_2_init)
+                                T<span style="color: #A2F; font-weight: bold">.</span>reads()
+                                T<span style="color: #A2F; font-weight: bold">.</span>writes(C_local[vi, vj])
+                                C_local[vi, vj] <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>float32(<span style="color: #008000">0.0</span>)
+                        <span style="color: #008000; font-weight: bold">for</span> k_0 <span style="color: #008000; font-weight: bold">in</span> range(<span style="color: #008000">128</span>):
+                            <span style="color: #008000; font-weight: bold">for</span> ax0_ax1_fused_0 <span style="color: #008000; font-weight: bold">in</span> range(<span style="color: #008000">2</span>):
+                                <span style="color: #008000; font-weight: bold">for</span> ax0_ax1_fused_1 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>thread_binding(<span style="color: #008000">64</span>, thread<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;threadIdx.x&quot;</span>):
+                                    <span style="color: #008000; font-weight: bold">for</span> ax0_ax1_fused_2 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>vectorized(<span style="color: #008000">4</span>):
+                                        <span style="color: #008000; font-weight: bold">with</span> T<span style="color: #A2F; font-weight: bold">.</span>block(<span style="color: #BA2121">&quot;A_shared&quot;</span>):
+                                            v0 <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>spatial(<span style="color: #008000">1024</span>, i_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">64</span> <span style="color: #A2F; font-weight: bold">+</span> (ax0_ax1_fused_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">256</span> <span style="color: #A2F; font-weight: bold">+</span> ax0_ax1_fused_1 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">4</span> <span style="color: #A2F; font-weight: bold">+</span> ax0_ax1_fused_2) <span style="color: #A2F; font-weight: bold">//</span> <span style="color: #008000">8</span>)
+                                            v1 <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>spatial(<span style="color: #008000">1024</span>, k_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">8</span> <span style="color: #A2F; font-weight: bold">+</span> (ax0_ax1_fused_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">256</span> <span style="color: #A2F; font-weight: bold">+</span> ax0_ax1_fused_1 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">4</span> <span style="color: #A2F; font-weight: bold">+</span> ax0_ax1_fused_2) <span style="color: #A2F; font-weight: bold">%</span> <span style="color: #008000">8</span>)
+                                            T<span style="color: #A2F; font-weight: bold">.</span>reads(A[v0, v1])
+                                            T<span style="color: #A2F; font-weight: bold">.</span>writes(A_shared[v0, v1])
+                                            A_shared[v0, v1] <span style="color: #A2F; font-weight: bold">=</span> A[v0, v1]
+                            <span style="color: #008000; font-weight: bold">for</span> ax0_ax1_fused_0 <span style="color: #008000; font-weight: bold">in</span> range(<span style="color: #008000">2</span>):
+                                <span style="color: #008000; font-weight: bold">for</span> ax0_ax1_fused_1 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>thread_binding(<span style="color: #008000">64</span>, thread<span style="color: #A2F; font-weight: bold">=</span><span style="color: #BA2121">&quot;threadIdx.x&quot;</span>):
+                                    <span style="color: #008000; font-weight: bold">for</span> ax0_ax1_fused_2 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>vectorized(<span style="color: #008000">4</span>):
+                                        <span style="color: #008000; font-weight: bold">with</span> T<span style="color: #A2F; font-weight: bold">.</span>block(<span style="color: #BA2121">&quot;B_shared&quot;</span>):
+                                            v0 <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>spatial(<span style="color: #008000">1024</span>, k_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">8</span> <span style="color: #A2F; font-weight: bold">+</span> (ax0_ax1_fused_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">256</span> <span style="color: #A2F; font-weight: bold">+</span> ax0_ax1_fused_1 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">4</span> <span style="color: #A2F; font-weight: bold">+</span> ax0_ax1_fused_2) <span style="color: #A2F; font-weight: bold">//</span> <span style="color: #008000">64</span>)
+                                            v1 <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>spatial(<span style="color: #008000">1024</span>, j_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">64</span> <span style="color: #A2F; font-weight: bold">+</span> (ax0_ax1_fused_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">256</span> <span style="color: #A2F; font-weight: bold">+</span> ax0_ax1_fused_1 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">4</span> <span style="color: #A2F; font-weight: bold">+</span> ax0_ax1_fused_2) <span style="color: #A2F; font-weight: bold">%</span> <span style="color: #008000">64</span>)
+                                            T<span style="color: #A2F; font-weight: bold">.</span>reads(B[v0, v1])
+                                            T<span style="color: #A2F; font-weight: bold">.</span>writes(B_shared[v0, v1])
+                                            B_shared[v0, v1] <span style="color: #A2F; font-weight: bold">=</span> B[v0, v1]
+                            <span style="color: #008000; font-weight: bold">for</span> k_1, i_2, j_2 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>grid(<span style="color: #008000">8</span>, <span style="color: #008000">8</span>, <span style="color: #008000">8</span>):
+                                <span style="color: #008000; font-weight: bold">with</span> T<span style="color: #A2F; font-weight: bold">.</span>block(<span style="color: #BA2121">&quot;C_update&quot;</span>):
+                                    vi <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>spatial(<span style="color: #008000">1024</span>, i_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">64</span> <span style="color: #A2F; font-weight: bold">+</span> i_1_j_1_fused <span style="color: #A2F; font-weight: bold">//</span> <span style="color: #008000">8</span> <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">8</span> <span style="color: #A2F; font-weight: bold">+</span> i_2)
+                                    vj <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>spatial(<span style="color: #008000">1024</span>, j_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">64</span> <span style="color: #A2F; font-weight: bold">+</span> i_1_j_1_fused <span style="color: #A2F; font-weight: bold">%</span> <span style="color: #008000">8</span> <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">8</span> <span style="color: #A2F; font-weight: bold">+</span> j_2)
+                                    vk <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>reduce(<span style="color: #008000">1024</span>, k_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">8</span> <span style="color: #A2F; font-weight: bold">+</span> k_1)
+                                    T<span style="color: #A2F; font-weight: bold">.</span>reads(C_local[vi, vj], A_shared[vi, vk], B_shared[vk, vj])
+                                    T<span style="color: #A2F; font-weight: bold">.</span>writes(C_local[vi, vj])
+                                    C_local[vi, vj] <span style="color: #A2F; font-weight: bold">=</span> C_local[vi, vj] <span style="color: #A2F; font-weight: bold">+</span> A_shared[vi, vk] <span style="color: #A2F; font-weight: bold">*</span> B_shared[vk, vj]
+                        <span style="color: #008000; font-weight: bold">for</span> ax0, ax1 <span style="color: #008000; font-weight: bold">in</span> T<span style="color: #A2F; font-weight: bold">.</span>grid(<span style="color: #008000">8</span>, <span style="color: #008000">8</span>):
+                            <span style="color: #008000; font-weight: bold">with</span> T<span style="color: #A2F; font-weight: bold">.</span>block(<span style="color: #BA2121">&quot;C_local&quot;</span>):
+                                v0 <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>spatial(<span style="color: #008000">1024</span>, i_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">64</span> <span style="color: #A2F; font-weight: bold">+</span> i_1_j_1_fused <span style="color: #A2F; font-weight: bold">//</span> <span style="color: #008000">8</span> <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">8</span> <span style="color: #A2F; font-weight: bold">+</span> ax0)
+                                v1 <span style="color: #A2F; font-weight: bold">=</span> T<span style="color: #A2F; font-weight: bold">.</span>axis<span style="color: #A2F; font-weight: bold">.</span>spatial(<span style="color: #008000">1024</span>, j_0 <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">64</span> <span style="color: #A2F; font-weight: bold">+</span> i_1_j_1_fused <span style="color: #A2F; font-weight: bold">%</span> <span style="color: #008000">8</span> <span style="color: #A2F; font-weight: bold">*</span> <span style="color: #008000">8</span> <span style="color: #A2F; font-weight: bold">+</span> ax1)
+                                T<span style="color: #A2F; font-weight: bold">.</span>reads(C_local[v0, v1])
+                                T<span style="color: #A2F; font-weight: bold">.</span>writes(C[v0, v1])
+                                C[v0, v1] <span style="color: #A2F; font-weight: bold">=</span> C_local[v0, v1]
+    </pre></div>
+
+
+
+.. raw:: latex
+
+   \diilbookstyleinputcell
+
+.. code:: python
+
+   rt_mod = tvm.build(sch.mod, target="cuda")
+   dev = tvm.cuda(0)
+   evaluator = rt_mod.time_evaluator("main", dev, number=10)
+
+   print("GEMM-Blocking: %f GFLOPS" % (num_flop / evaluator(A_nd, B_nd, C_nd).mean / 1e9))
+
+Leveraging Automatic Program Optimization
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+So far, we have been manually writing transformations to optimize the
+TensorIR program on GPU. We can leverage the automatic program
+optimization framework to tune the same program. The following code does
+that, we only set a small number here, and it can take a few min to
+finish.
+
+.. raw:: latex
+
+   \diilbookstyleinputcell
+
+.. code:: python
+
+   from tvm import meta_schedule as ms
+
+   database = ms.tune_tir(
+       mod=MyModuleMatmul,
+       target="nvidia/tesla-p100",
+       max_trials_global=64,
+       num_trials_per_iter=64,
+       work_dir="./tune_tmp",
+   )
+   sch = ms.tir_integration.compile_tir(database, MyModuleMatmul, "nvidia/tesla-p100")
+   sch.mod.show()
+
+.. raw:: latex
+
+   \diilbookstyleinputcell
+
+.. code:: python
+
+   rt_mod = tvm.build(sch.mod, target="nvidia/tesla-p100")
+   dev = tvm.cuda(0)
+   evaluator = rt_mod.time_evaluator("main", dev, number=10)
+
+   print("MetaSchedule: %f GFLOPS" % (num_flop / evaluator(A_nd, B_nd, C_nd).mean / 1e9))
+
+Summary
+~~~~~~~
+
+This chapter studies another axis of MLC – how we can transform our
+program for hardware acceleration. The MLC process helps us to bridge
+the input models toward different GPU programming models and
+environments. We will visit more hardware specialization topics in the
+incoming chapter as well.
+
+- A typical GPU contains two-level hierarchy. Each thread is indexed
+  by(in cuda terminology) ``threadIdx.x`` and ``blockIdx.x``\ (there can
+  be multiple dimension indices as well, but they can be fused to one.
+- Shared memory helps cache data commonly used across the threads within
+  the same block.
+- Encourage memory reuse during GPU optimization.

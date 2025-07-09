@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    
+    <title>Machine Learning Compiler &#8212; Machine Learing Compiler 0.0.1 documentation</title>
+
+    <link rel="stylesheet" href="_static/material-design-lite-1.3.0/material.blue-deep_orange.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/sphinx_materialdesign_theme.css" type="text/css" />
+    <link rel="stylesheet" href="_static/fontawesome/all.css" type="text/css" />
+    <link rel="stylesheet" href="_static/fonts.css" type="text/css" />
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/basic.css" />
+    <link rel="stylesheet" type="text/css" href="_static/d2l.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/sphinx_highlight.js"></script>
+    <script src="_static/d2l.js"></script>
+    <link rel="shortcut icon" href="_static/mlc-favicon.ico"/>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="1. Introduction" href="chapter_introduction/index.html" /> 
+  </head>
+<body>
+    <div class="mdl-layout mdl-js-layout mdl-layout--fixed-header mdl-layout--fixed-drawer"><header class="mdl-layout__header mdl-layout__header--waterfall ">
+    <div class="mdl-layout__header-row">
+        
+        <nav class="mdl-navigation breadcrumb">
+            <a class="mdl-navigation__link is-active">Machine Learning Compiler</a>
+        </nav>
+        <div class="mdl-layout-spacer"></div>
+        <nav class="mdl-navigation">
+        
+<form class="form-inline pull-sm-right" action="search.html" method="get">
+      <div class="mdl-textfield mdl-js-textfield mdl-textfield--expandable mdl-textfield--floating-label mdl-textfield--align-right">
+        <label id="quick-search-icon" class="mdl-button mdl-js-button mdl-button--icon"  for="waterfall-exp">
+          <i class="material-icons">search</i>
+        </label>
+        <div class="mdl-textfield__expandable-holder">
+          <input class="mdl-textfield__input" type="text" name="q"  id="waterfall-exp" placeholder="Search" />
+          <input type="hidden" name="check_keywords" value="yes" />
+          <input type="hidden" name="area" value="default" />
+        </div>
+      </div>
+      <div class="mdl-tooltip" data-mdl-for="quick-search-icon">
+      Quick search
+      </div>
+</form>
+        
+<a id="button-show-source"
+    class="mdl-button mdl-js-button mdl-button--icon"
+    href="_sources/index.rst.txt" rel="nofollow">
+  <i class="material-icons">code</i>
+</a>
+<div class="mdl-tooltip" data-mdl-for="button-show-source">
+Show Source
+</div>
+        </nav>
+    </div>
+    <div class="mdl-layout__header-row header-links">
+      <div class="mdl-layout-spacer"></div>
+      <nav class="mdl-navigation">
+          
+              <a  class="mdl-navigation__link" href="https://mlc.ai/summer22">
+                  <i class="fas fa-user-graduate"></i>
+                  Course
+              </a>
+          
+              <a  class="mdl-navigation__link" href="https://github.com/mlc-ai/mlc-en">
+                  <i class="fab fa-github"></i>
+                  GitHub
+              </a>
+          
+              <a  class="mdl-navigation__link" href="https://mlc.ai/zh">
+                  <i class="fas fa-external-link-alt"></i>
+                  中文版
+              </a>
+      </nav>
+    </div>
+</header><header class="mdl-layout__drawer">
+    
+          <!-- Title -->
+      <span class="mdl-layout-title">
+          <a class="title" href="#">
+              <img class="logo" src="_static/mlc-logo-with-text-landscape.svg" alt="Machine Learing Compiler"/>
+          </a>
+      </span>
+    
+    
+      <div class="globaltoc">
+        <span class="mdl-layout-title toc">Table Of Contents</span>
+        
+        
+            
+            <nav class="mdl-navigation">
+                <ul>
+<li class="toctree-l1"><a class="reference internal" href="chapter_introduction/index.html">1. Introduction</a></li>
+<li class="toctree-l1"><a class="reference internal" href="chapter_tensor_program/index.html">2. Tensor Program Abstraction</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="chapter_tensor_program/tensor_program.html">2.1. Primitive Tensor Function</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_tensor_program/tensor_program.html#tensor-program-abstraction">2.2. Tensor Program Abstraction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_tensor_program/tensor_program.html#summary">2.3. Summary</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_tensor_program/case_study.html">2.4. TensorIR: Tensor Program Abstraction Case Study</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_tensor_program/tensorir_exercises.html">2.5. Exercises for TensorIR</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="chapter_end_to_end/index.html">3. End to End Model Execution</a></li>
+<li class="toctree-l1"><a class="reference internal" href="chapter_auto_program_optimization/index.html">4. Automatic Program Optimization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="chapter_integration/index.html">5. Integration with Machine Learning Frameworks</a></li>
+<li class="toctree-l1"><a class="reference internal" href="chapter_gpu_acceleration/index.html">6. GPU and Hardware Acceleration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="chapter_gpu_acceleration/part1.html">6.1. Part 1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_gpu_acceleration/part2.html">6.2. Part 2</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="chapter_graph_optimization/index.html">7. Computational Graph Optimization</a></li>
+</ul>
+
+            </nav>
+        
+        </div>
+    
+</header>
+        <main class="mdl-layout__content" tabIndex="0">
+
+	<script type="text/javascript" src="_static/sphinx_materialdesign_theme.js "></script>
+    <header class="mdl-layout__drawer">
+    
+          <!-- Title -->
+      <span class="mdl-layout-title">
+          <a class="title" href="#">
+              <img class="logo" src="_static/mlc-logo-with-text-landscape.svg" alt="Machine Learing Compiler"/>
+          </a>
+      </span>
+    
+    
+      <div class="globaltoc">
+        <span class="mdl-layout-title toc">Table Of Contents</span>
+        
+        
+            
+            <nav class="mdl-navigation">
+                <ul>
+<li class="toctree-l1"><a class="reference internal" href="chapter_introduction/index.html">1. Introduction</a></li>
+<li class="toctree-l1"><a class="reference internal" href="chapter_tensor_program/index.html">2. Tensor Program Abstraction</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="chapter_tensor_program/tensor_program.html">2.1. Primitive Tensor Function</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_tensor_program/tensor_program.html#tensor-program-abstraction">2.2. Tensor Program Abstraction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_tensor_program/tensor_program.html#summary">2.3. Summary</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_tensor_program/case_study.html">2.4. TensorIR: Tensor Program Abstraction Case Study</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_tensor_program/tensorir_exercises.html">2.5. Exercises for TensorIR</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="chapter_end_to_end/index.html">3. End to End Model Execution</a></li>
+<li class="toctree-l1"><a class="reference internal" href="chapter_auto_program_optimization/index.html">4. Automatic Program Optimization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="chapter_integration/index.html">5. Integration with Machine Learning Frameworks</a></li>
+<li class="toctree-l1"><a class="reference internal" href="chapter_gpu_acceleration/index.html">6. GPU and Hardware Acceleration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="chapter_gpu_acceleration/part1.html">6.1. Part 1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_gpu_acceleration/part2.html">6.2. Part 2</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="chapter_graph_optimization/index.html">7. Computational Graph Optimization</a></li>
+</ul>
+
+            </nav>
+        
+        </div>
+    
+</header>
+
+    <div class="document">
+        <div class="page-content" role="main">
+        
+  <section id="machine-learning-compiler">
+<h1>Machine Learning Compiler<a class="headerlink" href="#machine-learning-compiler" title="Permalink to this heading">¶</a></h1>
+<p>Deploying innovative AI models in different production environments
+becomes a common problem as AI applications become more ubiquitous in
+our daily lives. Deployment of both training and inference workloads
+bring great challenges as we start to support a combinatorial choice of
+models and environment. Additionally, real world applications bring with
+a multitude of goals, such as minimizing dependencies, broader model
+coverage, leveraging the emerging hardware primitives for performance,
+reducing memory footprint, and scaling to larger environments.</p>
+<p>Solving these problems for training and inference involves a combination
+of ML programming abstractions, learning-driven search, compilation, and
+optimized library runtime. These themes form an emerging topic – machine
+learning compilation that contains active ongoing developments. In this
+tutorials sequence, we offer the first comprehensive treatment of its
+kind to study key elements in this emerging field systematically. We
+will learn the key abstractions to represent machine learning programs,
+automatic optimization techniques, and approaches to optimize
+dependency, memory, and performance in end-to-end machine learning
+deployment.</p>
+<p>This material serves as the reference for <a class="reference external" href="/summer22">MLC course</a>, we
+will populate notes and tutorials here as course progresses.</p>
+<div class="toctree-wrapper compound">
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="chapter_introduction/index.html">1. Introduction</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="chapter_introduction/index.html#what-is-ml-compilation">1.1. What is ML Compilation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_introduction/index.html#why-study-ml-compilation">1.2. Why Study ML Compilation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_introduction/index.html#key-elements-of-ml-compilation">1.3. Key Elements of ML Compilation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_introduction/index.html#summary">1.4. Summary</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="chapter_tensor_program/index.html">2. Tensor Program Abstraction</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="chapter_tensor_program/tensor_program.html">2.1. Primitive Tensor Function</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_tensor_program/tensor_program.html#tensor-program-abstraction">2.2. Tensor Program Abstraction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_tensor_program/tensor_program.html#summary">2.3. Summary</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_tensor_program/case_study.html">2.4. TensorIR: Tensor Program Abstraction Case Study</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_tensor_program/tensorir_exercises.html">2.5. Exercises for TensorIR</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="chapter_end_to_end/index.html">3. End to End Model Execution</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="chapter_end_to_end/index.html#prelude">3.1. Prelude</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_end_to_end/index.html#preparations">3.2. Preparations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_end_to_end/index.html#end-to-end-model-integration">3.3. End to End Model Integration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_end_to_end/index.html#constructing-an-end-to-end-irmodule-in-tvmscript">3.4. Constructing an End to End IRModule in TVMScript</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_end_to_end/index.html#build-and-run-the-model">3.5. Build and Run the Model</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_end_to_end/index.html#integrate-existing-libraries-in-the-environment">3.6. Integrate Existing Libraries in the Environment</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_end_to_end/index.html#mixing-tensorir-code-and-libraries">3.7. Mixing TensorIR Code and Libraries</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_end_to_end/index.html#bind-parameters-to-irmodule">3.8. Bind Parameters to IRModule</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_end_to_end/index.html#discussions">3.9. Discussions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_end_to_end/index.html#summary">3.10. Summary</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="chapter_auto_program_optimization/index.html">4. Automatic Program Optimization</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="chapter_auto_program_optimization/index.html#prelude">4.1. Prelude</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_auto_program_optimization/index.html#preparations">4.2. Preparations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_auto_program_optimization/index.html#recap-transform-a-primitive-tensor-function">4.3. Recap: Transform a Primitive Tensor Function.</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_auto_program_optimization/index.html#stochastic-schedule-transformation">4.4. Stochastic Schedule Transformation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_auto_program_optimization/index.html#search-over-stochastic-transformations">4.5. Search Over Stochastic Transformations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_auto_program_optimization/index.html#putting-things-back-to-end-to-end-model-execution">4.6. Putting Things Back to End to End Model Execution</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_auto_program_optimization/index.html#discussions">4.7. Discussions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_auto_program_optimization/index.html#summary">4.8. Summary</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="chapter_integration/index.html">5. Integration with Machine Learning Frameworks</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="chapter_integration/index.html#prelude">5.1. Prelude</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_integration/index.html#preparations">5.2. Preparations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_integration/index.html#build-an-irmodule-through-a-builder">5.3. Build an IRModule Through a Builder</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_integration/index.html#import-model-from-pytorch">5.4. Import Model From PyTorch</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_integration/index.html#coming-back-to-fashionmnist-example">5.5. Coming back to FashionMNIST Example</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_integration/index.html#remark-translating-into-high-level-operators">5.6. Remark: Translating into High-level Operators</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_integration/index.html#discussions">5.7. Discussions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_integration/index.html#summary">5.8. Summary</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="chapter_gpu_acceleration/index.html">6. GPU and Hardware Acceleration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="chapter_gpu_acceleration/part1.html">6.1. Part 1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_gpu_acceleration/part2.html">6.2. Part 2</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="chapter_graph_optimization/index.html">7. Computational Graph Optimization</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="chapter_graph_optimization/index.html#prelude">7.1. Prelude</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_graph_optimization/index.html#preparations">7.2. Preparations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_graph_optimization/index.html#pattern-match-and-rewriting">7.3. Pattern Match and Rewriting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_graph_optimization/index.html#fuse-linear-and-relu">7.4. Fuse Linear and ReLU</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_graph_optimization/index.html#map-to-tensorir-calls">7.5. Map to TensorIR Calls</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_graph_optimization/index.html#build-and-run">7.6. Build and Run</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_graph_optimization/index.html#discussion">7.7. Discussion</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapter_graph_optimization/index.html#summary">7.8. Summary</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</section>
+
+
+        </div>
+        <div class="side-doc-outline">
+            <div class="side-doc-outline--content"> 
+            </div>
+        </div>
+
+      <div class="clearer"></div>
+    </div><div class="pagenation">
+     <a id="button-next" href="chapter_introduction/index.html" class="mdl-button mdl-js-button mdl-js-ripple-effect mdl-button--colored" role="botton" accesskey="N">
+         <i class="pagenation-arrow-R fas fa-arrow-right fa-lg"></i>
+        <div class="pagenation-text">
+            <span class="pagenation-direction">Next</span>
+            <div>1. Introduction</div>
+        </div>
+     </a>
+  </div>
+        
+        </main>
+    </div>
+  </body>
+</html>
